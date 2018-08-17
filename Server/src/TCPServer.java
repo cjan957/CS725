@@ -5,7 +5,14 @@
  **/
 
 import java.io.*; 
-import java.net.*; 
+import java.net.*;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileOwnerAttributeView;
+import java.nio.file.attribute.FileTime;
+import java.text.SimpleDateFormat; 
 
 class TCPServer { 
 	private  Socket connectionSocket;
@@ -20,6 +27,8 @@ class TCPServer {
 	
 	private String transmissionType = "B"; //default binary
 	
+	private final String HOME_DIRECTORY = FileSystems.getDefault().getPath("storage").toString();
+	private String currentDirectory = HOME_DIRECTORY;
 	
 	Users userDetail;
 	Database db;
@@ -101,6 +110,10 @@ class TCPServer {
 		{
 			typeCommand(clientRequest);
 		}
+		else if(command.equals("list"))
+		{
+			listCommand(clientRequest);
+		}
 		else if(command.equals("done")) 
 		{
 			doneCommand();
@@ -108,6 +121,102 @@ class TCPServer {
 		else
 		{
 			sendMessageToClient("- invalid input", ResponseCodes.ERROR);
+		}
+		
+	}
+	
+	private void listCommand(String clientRequest)
+	{
+		String[] requestBreakdown = clientRequest.split(" ");
+		String mode = "";
+		String listOfFile_out = "";
+		
+		//LIST + F or V, current directory!
+		if(requestBreakdown.length == 2 || requestBreakdown.length == 3)
+		{
+			File filePath = new File(currentDirectory);
+
+			if(requestBreakdown.length == 3)
+			{
+				filePath = new File(currentDirectory + "/" + requestBreakdown[2]);
+				if(!filePath.isDirectory())
+				{
+					sendMessageToClient("Invalid directory", ResponseCodes.ERROR);
+					return;
+				}
+			}
+			
+			mode = requestBreakdown[1].toUpperCase();
+			
+			if(mode.equals("F") || mode.equals("V"))
+			{
+				File[] fileList = filePath.listFiles();
+				
+				listOfFile_out = listOfFile_out.concat(String.format("%s\r\n", currentDirectory));
+				
+				for(int i = 0; i < fileList.length; i++)
+				{
+					String fileName = fileList[i].getName();
+
+					if(fileList[i].isFile())
+					{
+						if(mode.equals("F"))
+						{
+							listOfFile_out = listOfFile_out.concat(String.format("%s\r\n", fileName));
+						}
+						else
+						{
+							try {
+								BasicFileAttributes basic_attr = Files.readAttributes(fileList[i].toPath(), BasicFileAttributes.class);	
+								FileOwnerAttributeView owner_attr = Files.getFileAttributeView(fileList[i].toPath(), FileOwnerAttributeView.class);
+								
+								long size = basic_attr.size();
+								
+								FileTime lastModified = basic_attr.lastModifiedTime();
+								
+								SimpleDateFormat format = new SimpleDateFormat("yyyy.MM.dd G 'at' HH:mm:ss z");
+								
+								String dateModified = format.format(lastModified.toMillis());
+								
+								String owner = owner_attr.getOwner().getName();
+								
+								String fileInfo = String.format("%s %s %s %s", fileName, size, dateModified, owner);
+								
+								listOfFile_out = listOfFile_out.concat(String.format("%s\r\n", fileInfo));
+							}
+							catch(Exception e)
+							{
+								sendMessageToClient("Files access errors", ResponseCodes.ERROR);
+								break;
+							}	
+						}
+					}
+					else 
+					{
+						//if folder
+						String folderName = String.format("%s/\r\n", fileName);
+						listOfFile_out = listOfFile_out.concat(folderName);
+					}
+				}
+				
+				if(mode.equals("F"))
+				{
+					//listing is terminated with <NULL> after the last <CRLF> (loop)
+					listOfFile_out.concat(Character.toString('\0'));
+				}
+				sendMessageToClient(listOfFile_out,ResponseCodes.SUCCESS);	
+			}
+			else
+			{
+				sendMessageToClient("Invalid Mode", ResponseCodes.ERROR);
+				return;
+			}
+			
+		}
+		else
+		{
+			sendMessageToClient("Invalid arguments", ResponseCodes.ERROR);
+			return;
 		}
 		
 	}
@@ -384,7 +493,7 @@ class TCPServer {
 		}
 	}
 	
-	private  boolean validateClientRequest(String request) {
+	private boolean validateClientRequest(String request) {
 		
 		//split request to check the command
 		String[] requestBreakdown = request.split(" ");
