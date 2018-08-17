@@ -87,7 +87,6 @@ class TCPClient {
 	private void closeConnection(String sentence)
 	{
 		sendMessageToServer(sentence);
-		
 	}
 	
 	private boolean isLoggedInStatus(String message)
