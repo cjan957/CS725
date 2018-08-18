@@ -19,6 +19,9 @@ class TCPServer {
 	private Socket connectionSocket;
 	private BufferedReader inFromClient;
 	private DataOutputStream outToClient;
+	
+	//private DataInputStream dataInFromClient;
+	private DataOutputStream dataOutToClient;
 
 	private boolean passwordValid;
 	private boolean usernameValid;
@@ -36,7 +39,7 @@ class TCPServer {
 
 	// private static String accountFile = "";
 	private enum ResponseCodes {
-		SUCCESS, ERROR, LOGGEDIN
+		SUCCESS, ERROR, LOGGEDIN, EMPTY
 	}
 
 	public static void main(String argv[]) throws IOException {
@@ -71,9 +74,11 @@ class TCPServer {
 		connectionSocket = welcomeSocket.accept();
 
 		inFromClient = new BufferedReader(new InputStreamReader(connectionSocket.getInputStream()));
-
 		outToClient = new DataOutputStream(connectionSocket.getOutputStream());
 
+		//dataInFromClient = new DataInputStream(new BufferedInputStream(connectionSocket.getInputStream()));
+		dataOutToClient = new DataOutputStream(new BufferedOutputStream(connectionSocket.getOutputStream()));
+		
 		sendMessageToClient("cjan957 SFTP Service", ResponseCodes.SUCCESS);
 	}
 
@@ -118,8 +123,9 @@ class TCPServer {
 			String argument = clientRequest.substring(clientRequest.indexOf(' ') + 1);
 				
 			File file = new File(currentDirectory + "/" + argument);
+			long size;
 				
-			if(!file.isFile())
+			if(!file.isFile() || !file.exists())
 			{
 				sendMessageToClient("File doesn't exist", ResponseCodes.ERROR);
 				return;
@@ -127,20 +133,77 @@ class TCPServer {
 			
 			try {
 				BasicFileAttributes basic_attr = Files.readAttributes(file.toPath(), BasicFileAttributes.class);
-				long size = basic_attr.size();
+				size = basic_attr.size();
 				
-				sendMessageToClient(Long.toString(size), ResponseCodes.SUCCESS);
+				sendMessageToClient(Long.toString(size), ResponseCodes.EMPTY);
 			}
 			catch(Exception e)
 			{
 				sendMessageToClient("File doesn't exist", ResponseCodes.ERROR);
 				return;
 			}
+			
+			if(waitClientForSEND())
+			{
+				System.out.println("System received SEND");
+				try {
+					sendFile(file);
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		}
+			
+	}
+	private void sendFile(File file) throws IOException {		
+		if(transmissionType.equals("A"))
+		{	
+			sendMessageToClient("A type not supported, RETR aborted", ResponseCodes.ERROR);
+		}
+		else if(transmissionType.equals("B"))
+		{
+			byte buffer[] = new byte[1];
+			FileInputStream in = new FileInputStream(file);
+			BufferedInputStream bufferIn = new BufferedInputStream(in);
+			
+			while((bufferIn.read(buffer)) > 0)
+			{
+				dataOutToClient.write(buffer);
+			}
+			System.out.println("SErver sent!");
+			in.close();
+			bufferIn.close();
+			dataOutToClient.flush();
+			
+		}
+		else
+		{
+			sendMessageToClient("C type not supported, RETR aborted", ResponseCodes.ERROR);
 		}
 	}
 
+	private boolean waitClientForSEND() {
+		while (true) {
+			String clientRequest = readMessageFromClient();
+			if(clientRequest.toUpperCase().equals("SEND"))
+			{
+				return true;
+			}
+			else if(clientRequest.toUpperCase().equals("STOP"))
+			{
+				sendMessageToClient("ok, RETR aborted", ResponseCodes.ERROR);
+				return false;
+			}
+			else
+			{
+				sendMessageToClient("invalid command, RETR aborted", ResponseCodes.ERROR);
+				return false;
+			}
+		}
+		
+	}
+
 	private void nameCommand(String clientRequest) {
-		// TODO Auto-generated method stub
 		String[] requestBreakdown = clientRequest.split(" ");
 
 		if (requestBreakdown.length > 1) {
@@ -392,7 +455,7 @@ class TCPServer {
 
 								String owner = owner_attr.getOwner().getName();
 
-								String fileInfo = String.format("%s %s %s %s", fileName, size, dateModified, owner);
+								String fileInfo = String.format("%s %s %s %s", dateModified, owner, size,  fileName);
 
 								listOfFile_out = listOfFile_out.concat(String.format("%s\r\n", fileInfo));
 							} catch (Exception e) {
@@ -641,6 +704,9 @@ class TCPServer {
 			break;
 		case LOGGEDIN:
 			statusSymbol = "!";
+			break;
+		case EMPTY:
+			statusSymbol = " ";
 			break;
 		}
 		try {

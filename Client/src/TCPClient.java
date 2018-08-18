@@ -5,17 +5,31 @@
  **/
 
 import java.io.*; 
-import java.net.*; 
+import java.net.*;
+import java.nio.file.FileSystems; 
 class TCPClient { 
 	
-	Socket clientSocket;
+	private Socket clientSocket;
 	
-	BufferedReader inFromUser;
-	DataOutputStream outToServer;
-	BufferedReader inFromServer;
+	private BufferedReader inFromUser;
+	private DataOutputStream outToServer;
+	private BufferedReader inFromServer;
+	
+	private DataInputStream dataInFromServer;
+	//private OutputStream dataOutToServer;
+	
+	private FileOutputStream dataWriteLocal;
+	
+	private String fileNameToSave = "";
 	
 	boolean loggedIn = false;
 	boolean userOK = false;
+	
+	private final String HOME_DIRECTORY = FileSystems.getDefault().getPath("storage").toString();
+	
+	private enum ResponseCodes {
+		SUCCESS, ERROR, LOGGEDIN, EMPTY
+	}
 	
 	public TCPClient() throws UnknownHostException, IOException
 	{
@@ -30,6 +44,13 @@ class TCPClient {
 		inFromServer = 
 			new BufferedReader(new
 				InputStreamReader(clientSocket.getInputStream())); 
+		
+		dataInFromServer = 
+			new DataInputStream(clientSocket.getInputStream());
+		
+//		dataOutToServer = 
+//			new DataOutputStream(clientSocket.getOutputStream());
+		
 	}
 	
 	private void start() throws IOException
@@ -42,7 +63,7 @@ class TCPClient {
 		while(true)
 		{
 			 serverWelcome = readMessageFromServer();
-			 if(isSuccessStatus(serverWelcome))
+			 if(checkResponseCode(serverWelcome).equals(ResponseCodes.SUCCESS))
 			 {
 				 System.out.println("FROM SERVER: " + serverWelcome);
 				 break;
@@ -53,28 +74,49 @@ class TCPClient {
 			sentence = inFromUser.readLine();
 	
 			String[] requestBreakdown = sentence.split(" ");
+			
 			if(requestBreakdown.length == 1)
 			{
-				String singleCommand = requestBreakdown[0].toLowerCase();
-				if(singleCommand.equals("done"))
+				String singleCommand = requestBreakdown[0].toUpperCase();
+
+				switch (singleCommand)
 				{
-					closeConnection(sentence);
+					case "DONE":
+						closeConnection(sentence);
+					break;
 				}
 			}
-
+			else
+			{
+				String command = requestBreakdown[0].toUpperCase();
+				String argument = sentence.substring(sentence.indexOf(' ') + 1);
 				
+				if(command.equals("RETR"))
+				{
+					fileNameToSave = argument;
+				}
+			}
+	
 			if(sendMessageToServer(sentence))
 			{
 				reply = readMessageFromServer();
+				
+				//Server responded RETR command with the size of the file to be sent
+				if(checkResponseCode(reply).equals(ResponseCodes.EMPTY))
+				{
+					checkSpaceAndAcknowledge(reply);
+				}
 			    
-			    if(isLoggedInStatus(reply))
-			    {
-			    	loggedIn = true;
-			    }
-			    else if(!loggedIn && isSuccessStatus(reply))
-			    {	
-			    	userOK = true;
-			    }
+				//Check for ! to see whether user has been logged in on the server, this will
+				//unlock other commands.
+				if(checkResponseCode(reply).equals(ResponseCodes.LOGGEDIN))
+				{
+					loggedIn = true;
+				}
+				else if(!loggedIn && checkResponseCode(reply).equals(ResponseCodes.SUCCESS))
+				{
+					userOK = true;
+				}
 				
 			    System.out.println("FROM SERVER: " + reply);
 			}
@@ -84,32 +126,78 @@ class TCPClient {
 	   // clientSocket.close(); 
 	}
 	
+	private void checkSpaceAndAcknowledge(String reply) throws IOException 
+	{
+		String[] replyBreakdown = reply.split(" ");
+		
+		if(replyBreakdown.length == 1 || replyBreakdown.length > 2)
+		{
+			//wrong
+		}
+		else
+		{
+			File localPath = new File(HOME_DIRECTORY);
+			long availableSpace = localPath.getUsableSpace();
+			long spaceRequired = Long.parseLong(replyBreakdown[1]);
+			
+			if(spaceRequired < availableSpace)
+			{
+				//ok
+				dataWriteLocal = new FileOutputStream(HOME_DIRECTORY + "/" + fileNameToSave);
+				BufferedOutputStream outStream = new BufferedOutputStream(dataWriteLocal);
+				
+				int fileSize = (int) spaceRequired;
+				
+				
+				byte[] bytes = new byte[1];
+				int count;
+				int totalCount = 0;
+				sendMessageToServer("SEND");
+				
+				while(    (count = dataInFromServer.read(bytes)) > 0)
+				{
+					outStream.write(bytes,0,count);
+					totalCount += count;
+					if(totalCount == 921653) {
+						System.out.println(totalCount);
+					}
+				}
+				
+				System.out.println("Total read: " + totalCount);
+				
+				dataWriteLocal.close();
+				outStream.close();
+	
+			}
+			else
+			{
+				//no space
+				sendMessageToServer("STOP");
+			}
+			
+		}
+	}
+
+
 	private void closeConnection(String sentence)
 	{
 		sendMessageToServer(sentence);
 	}
 	
-	private boolean isLoggedInStatus(String message)
+	private ResponseCodes checkResponseCode(String message)
 	{
-		if(message.charAt(0) == '!')
+		switch (message.charAt(0))
 		{
-			return true;
-		}
-		else
-		{
-			return false;
-		}
-	}
-	
-	private boolean isSuccessStatus(String message)
-	{
-		if(message.charAt(0) == '+')
-		{
-			return true;
-		}
-		else
-		{
-			return false;
+			case '!':
+				return ResponseCodes.LOGGEDIN;
+			case '+':
+				return ResponseCodes.SUCCESS;
+			case '-':
+				return ResponseCodes.ERROR;
+			case ' ':
+				return ResponseCodes.EMPTY;
+			default:
+				return ResponseCodes.ERROR;
 		}
 	}
 	
@@ -183,7 +271,7 @@ class TCPClient {
 		{
 			String lowerCommand = requestBreakdown[0].toLowerCase();
 
-			if(lowerCommand.equals("done"))
+			if(lowerCommand.equals("done") || lowerCommand.equals("send") || lowerCommand.equals("stop"))
 			{
 				return true;
 			}
