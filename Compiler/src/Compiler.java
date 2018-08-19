@@ -15,11 +15,10 @@ public class Compiler
 		str = str.concat(String.format("%s\r\n", filename));
 		str = str.concat(String.format("%s\r\n", filename));
 
-		String clientRequest = " PAScjan957sdfkj";
+		String clientRequest = "STOR OLD new car.jpg";
 		String[] requestBreakdown = clientRequest.split(" ");
 
-		String command = clientRequest.substring(0, clientRequest.indexOf(' '));
-		String password = clientRequest.substring(clientRequest.indexOf(' ') + 1);
+		String filieName = clientRequest.substring(9);
 		
 		
     }

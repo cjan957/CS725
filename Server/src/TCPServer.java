@@ -15,13 +15,14 @@ import java.nio.file.attribute.FileOwnerAttributeView;
 import java.nio.file.attribute.FileTime;
 import java.text.SimpleDateFormat;
 
+
 class TCPServer {
 	private Socket connectionSocket;
 	private BufferedReader inFromClient;
 	private DataOutputStream outToClient;
 	
-	//private DataInputStream dataInFromClient;
-	private DataOutputStream dataOutToClient;
+	private InputStream dataInFromClient;
+	private OutputStream dataOutToClient;
 
 	private boolean passwordValid;
 	private boolean usernameValid;
@@ -76,8 +77,8 @@ class TCPServer {
 		inFromClient = new BufferedReader(new InputStreamReader(connectionSocket.getInputStream()));
 		outToClient = new DataOutputStream(connectionSocket.getOutputStream());
 
-		//dataInFromClient = new DataInputStream(new BufferedInputStream(connectionSocket.getInputStream()));
-		dataOutToClient = new DataOutputStream(new BufferedOutputStream(connectionSocket.getOutputStream()));
+		dataInFromClient = connectionSocket.getInputStream();
+		dataOutToClient = connectionSocket.getOutputStream();
 		
 		sendMessageToClient("cjan957 SFTP Service", ResponseCodes.SUCCESS);
 	}
@@ -107,11 +108,151 @@ class TCPServer {
 			doneCommand();
 		} else if (command.equals("retr")) {
 			retrCommand(clientRequest);
+		} else if (command.equals("stor")) {
+			storCommand(clientRequest);
 		}
 		else {
 			sendMessageToClient("invalid input", ResponseCodes.ERROR);
 		}
 
+	}
+
+	private void storCommand(String clientRequest) {
+		String[] requestBreakdown = clientRequest.split(" ");
+		
+		String type = requestBreakdown[1].toUpperCase();
+		String fileName = clientRequest.substring(9); // STOR XXX {FILENAME} (9th char)
+		
+		if(type.equals("NEW") || type.equals("OLD") || type.equals("APP"))
+		{
+			File file = new File(currentDirectory + "/" + fileName);
+
+			switch (type)
+			{
+			case "NEW":
+				//Assume doesn't support file generation
+				if(file.exists())
+				{
+					//-File exists, but system doesn't support generation
+					sendMessageToClient("File exists, but system doesn't support generation", ResponseCodes.ERROR);
+				}
+				else
+				{
+					//+File does not exist, will create new file
+					sendMessageToClient("File does not exist, will create new file", ResponseCodes.SUCCESS);
+					waitForFileSizeFromClient(fileName, file, false);
+
+				}
+				
+				break;
+			case "OLD":
+				//overwrite or create a new one
+				if(file.exists())
+				{
+					//Will write over old file
+					sendMessageToClient("Will write over old file", ResponseCodes.SUCCESS);
+					waitForFileSizeFromClient(fileName, file, false);
+
+					
+				}
+				else
+				{
+					//will create new file
+					sendMessageToClient("Will create new file", ResponseCodes.SUCCESS);
+					waitForFileSizeFromClient(fileName, file, false);
+
+				}
+				
+				break;
+			case "APP":
+				//append or create
+				if(file.exists())
+				{
+					sendMessageToClient("Will append to file", ResponseCodes.SUCCESS);
+					waitForFileSizeFromClient(fileName, file, true);
+
+				}
+				else
+				{
+					sendMessageToClient("Will create file", ResponseCodes.SUCCESS);
+					waitForFileSizeFromClient(fileName, file, false);
+
+				}
+				break;
+			default:
+				sendMessageToClient("Invalid type, STOR aborted", ResponseCodes.ERROR);
+				break;
+					
+			}			
+		}
+	}
+
+	private void waitForFileSizeFromClient(String fileName, File file, boolean append) {
+		String clientResponse = readMessageFromClient();
+		
+		//Response should be: "SIZE ######"
+		String[] requestBreakdown = clientResponse.split(" ");
+
+		if(requestBreakdown[0].toUpperCase().equals("SIZE"))
+		{
+			long fileSize = 0;
+			try {
+				fileSize = Long.parseLong(requestBreakdown[1]);
+			}
+			catch (NumberFormatException e){
+				//invalid file size! TODO:
+				return;
+			}
+		
+			File localPath = new File(currentDirectory);
+			long availableSpace = localPath.getUsableSpace();
+			
+			if(fileSize < availableSpace)
+			{
+				sendMessageToClient("ok, waiting for file", ResponseCodes.SUCCESS);
+
+				
+				//do file operations
+				FileOutputStream dataWriteLocal;
+				try {
+					dataWriteLocal = new FileOutputStream(currentDirectory + "/" + fileName);
+					
+					byte[] bytes = new byte[1];
+					int count;
+					int totalCount = 0;
+					
+
+					while((count = dataInFromClient.read(bytes)) > 0)
+					{
+						dataWriteLocal.write(bytes, 0, count);
+						totalCount += count;
+						if(totalCount == fileSize) break;
+					}
+					
+					System.out.println("Total read: " + totalCount);
+					
+					dataWriteLocal.close();
+					
+				} catch (IOException e1) {
+					e1.printStackTrace();
+					return;
+				}
+								
+				sendMessageToClient("Saved " + fileName, ResponseCodes.SUCCESS);
+				
+			}
+			else
+			{
+				sendMessageToClient("Not enough room, don't send it", ResponseCodes.ERROR);
+			}
+		}
+		else
+		{
+			sendMessageToClient("Invalid message received, expected SIZE ####", ResponseCodes.ERROR);
+		}
+
+		
+		
 	}
 
 	private void retrCommand(String clientRequest) {
@@ -160,21 +301,21 @@ class TCPServer {
 		{	
 			sendMessageToClient("A type not supported, RETR aborted", ResponseCodes.ERROR);
 		}
+		
 		else if(transmissionType.equals("B"))
 		{
 			byte buffer[] = new byte[1];
 			FileInputStream in = new FileInputStream(file);
-			BufferedInputStream bufferIn = new BufferedInputStream(in);
+			//BufferedInputStream bufferIn = new BufferedInputStream(in);
 			
-			while((bufferIn.read(buffer)) > 0)
+			while((in.read(buffer)) > 0)
 			{
 				dataOutToClient.write(buffer);
 			}
-			System.out.println("SErver sent!");
-			in.close();
-			bufferIn.close();
-			dataOutToClient.flush();
 			
+			System.out.println("SErver sent!");
+			//in.close();
+			dataOutToClient.flush();
 		}
 		else
 		{

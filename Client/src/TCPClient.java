@@ -6,7 +6,9 @@
 
 import java.io.*; 
 import java.net.*;
-import java.nio.file.FileSystems; 
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.attribute.BasicFileAttributes; 
 class TCPClient { 
 	
 	private Socket clientSocket;
@@ -15,11 +17,9 @@ class TCPClient {
 	private DataOutputStream outToServer;
 	private BufferedReader inFromServer;
 	
-	private DataInputStream dataInFromServer;
-	//private OutputStream dataOutToServer;
-	
-	private FileOutputStream dataWriteLocal;
-	
+	private InputStream dataInFromServer;
+	private OutputStream dataOutToServer;
+		
 	private String fileNameToSave = "";
 	
 	boolean loggedIn = false;
@@ -45,11 +45,9 @@ class TCPClient {
 			new BufferedReader(new
 				InputStreamReader(clientSocket.getInputStream())); 
 		
-		dataInFromServer = 
-			new DataInputStream(clientSocket.getInputStream());
-		
-//		dataOutToServer = 
-//			new DataOutputStream(clientSocket.getOutputStream());
+		dataInFromServer = clientSocket.getInputStream();
+		dataOutToServer = clientSocket.getOutputStream();
+
 		
 	}
 	
@@ -71,10 +69,11 @@ class TCPClient {
 		}
 		
 		while(true) {
+			boolean storeCommandTriggered = false;
 			sentence = inFromUser.readLine();
 	
 			String[] requestBreakdown = sentence.split(" ");
-			
+
 			if(requestBreakdown.length == 1)
 			{
 				String singleCommand = requestBreakdown[0].toUpperCase();
@@ -88,16 +87,21 @@ class TCPClient {
 			}
 			else
 			{
-				String command = requestBreakdown[0].toUpperCase();
+				String command = sentence.substring(0, sentence.indexOf(' '));
 				String argument = sentence.substring(sentence.indexOf(' ') + 1);
 				
-				if(command.equals("RETR"))
+				if(command.toUpperCase().equals("RETR"))
 				{
 					fileNameToSave = argument;
 				}
+				else if(command.toUpperCase().equals("STOR")) 
+				{
+					storCommand(sentence);
+					storeCommandTriggered = true;
+				}
 			}
 	
-			if(sendMessageToServer(sentence))
+			if(sendMessageToServer(sentence) && storeCommandTriggered == false)
 			{
 				reply = readMessageFromServer();
 				
@@ -126,8 +130,80 @@ class TCPClient {
 	   // clientSocket.close(); 
 	}
 	
+	private void storCommand(String sentence) throws IOException {
+		
+		String[] requestBreakdown = sentence.split(" ");
+		
+		if(requestBreakdown[1].toUpperCase().equals("NEW") || requestBreakdown[1].toUpperCase().equals("OLD") ||
+				requestBreakdown[1].toUpperCase().equals("APP"))
+		{
+			String fileName = sentence.substring(9); // STOR XXX {FILENAME} (9th char)
+			
+			File file = new File(HOME_DIRECTORY + "/" + fileName);
+
+			if(!file.exists() && !file.isFile())
+			{
+				System.out.println("Local message: no file found in storage folder");
+				return; 
+			}
+			
+			sendMessageToServer(sentence);
+			
+			String reply = readMessageFromServer();
+			
+		    System.out.println("FROM SERVER: " + reply);
+
+			ResponseCodes fileSaveMethod = checkResponseCode(reply);
+			
+			if(fileSaveMethod.equals(ResponseCodes.ERROR))
+			{
+				return;
+			}
+			
+			BasicFileAttributes basic_attr = Files.readAttributes(file.toPath(), BasicFileAttributes.class);
+			long size = basic_attr.size();
+				
+			sendMessageToServer("SIZE " + Long.toString(size));
+				
+			String reply_send = readMessageFromServer();
+			
+			ResponseCodes canSendFileResponse = checkResponseCode(reply_send);
+			
+		    System.out.println("FROM SERVER: " + reply_send);
+				
+			if(canSendFileResponse.equals(ResponseCodes.SUCCESS))
+			{
+					//SEND FILE OPERATION
+					byte buffer[] = new byte[1];
+					FileInputStream in = new FileInputStream(file);
+				
+					while((in.read(buffer)) > 0)
+					{
+						dataOutToServer.write(buffer);
+					}
+					
+					System.out.println("Client sent!");
+					dataOutToServer.flush();
+					
+				    System.out.println("FROM SERVER: " + readMessageFromServer());
+
+					
+			}
+			else
+			{
+				return;
+			}	
+		}
+		else
+		{
+			System.out.println("Local message: invalid arguments/file");
+		}
+		
+	}
+
 	private void checkSpaceAndAcknowledge(String reply) throws IOException 
 	{
+		
 		String[] replyBreakdown = reply.split(" ");
 		
 		if(replyBreakdown.length == 1 || replyBreakdown.length > 2)
@@ -143,30 +219,24 @@ class TCPClient {
 			if(spaceRequired < availableSpace)
 			{
 				//ok
-				dataWriteLocal = new FileOutputStream(HOME_DIRECTORY + "/" + fileNameToSave);
-				BufferedOutputStream outStream = new BufferedOutputStream(dataWriteLocal);
+				FileOutputStream dataWriteLocal = new FileOutputStream(HOME_DIRECTORY + "/" + fileNameToSave);
+				//BufferedOutputStream outStream = new BufferedOutputStream(dataWriteLocal);
 				
 				int fileSize = (int) spaceRequired;
-				
 				
 				byte[] bytes = new byte[1];
 				int count;
 				int totalCount = 0;
 				sendMessageToServer("SEND");
 				
-				while(    (count = dataInFromServer.read(bytes)) > 0)
+				while((count = dataInFromServer.read(bytes)) > 0)
 				{
-					outStream.write(bytes,0,count);
+					dataWriteLocal.write(bytes, 0, count);
 					totalCount += count;
-					if(totalCount == 921653) {
-						System.out.println(totalCount);
-					}
+					if(totalCount == fileSize) break;
 				}
 				
 				System.out.println("Total read: " + totalCount);
-				
-				dataWriteLocal.close();
-				outStream.close();
 	
 			}
 			else
