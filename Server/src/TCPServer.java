@@ -14,6 +14,9 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileOwnerAttributeView;
 import java.nio.file.attribute.FileTime;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
+import java.util.LinkedList;
+import java.util.List;
 
 
 class TCPServer {
@@ -133,14 +136,14 @@ class TCPServer {
 				//Assume doesn't support file generation
 				if(file.exists())
 				{
-					//-File exists, but system doesn't support generation
-					sendMessageToClient("File exists, but system doesn't support generation", ResponseCodes.ERROR);
+					sendMessageToClient("File exists, will create new generation of file", ResponseCodes.SUCCESS);		
+					waitForFileSizeFromClient(fileName,file, 2);
 				}
 				else
 				{
 					//+File does not exist, will create new file
 					sendMessageToClient("File does not exist, will create new file", ResponseCodes.SUCCESS);
-					waitForFileSizeFromClient(fileName, file, false);
+					waitForFileSizeFromClient(fileName, file, 1);
 
 				}
 				
@@ -151,7 +154,7 @@ class TCPServer {
 				{
 					//Will write over old file
 					sendMessageToClient("Will write over old file", ResponseCodes.SUCCESS);
-					waitForFileSizeFromClient(fileName, file, false);
+					waitForFileSizeFromClient(fileName, file, 3);
 
 					
 				}
@@ -159,7 +162,7 @@ class TCPServer {
 				{
 					//will create new file
 					sendMessageToClient("Will create new file", ResponseCodes.SUCCESS);
-					waitForFileSizeFromClient(fileName, file, false);
+					waitForFileSizeFromClient(fileName, file, 1);
 
 				}
 				
@@ -169,13 +172,13 @@ class TCPServer {
 				if(file.exists())
 				{
 					sendMessageToClient("Will append to file", ResponseCodes.SUCCESS);
-					waitForFileSizeFromClient(fileName, file, true);
+					waitForFileSizeFromClient(fileName, file, 4);
 
 				}
 				else
 				{
 					sendMessageToClient("Will create file", ResponseCodes.SUCCESS);
-					waitForFileSizeFromClient(fileName, file, false);
+					waitForFileSizeFromClient(fileName, file, 1);
 
 				}
 				break;
@@ -187,7 +190,9 @@ class TCPServer {
 		}
 	}
 
-	private void waitForFileSizeFromClient(String fileName, File file, boolean append) {
+	
+	//Operation: 1 = create a new file, 2 = NEW generation 3 = Overwrite, 4 = Append
+	private void waitForFileSizeFromClient(String fileName, File file, int operation) {
 		String clientResponse = readMessageFromClient();
 		
 		//Response should be: "SIZE ######"
@@ -211,16 +216,47 @@ class TCPServer {
 			{
 				sendMessageToClient("ok, waiting for file", ResponseCodes.SUCCESS);
 
+				//create a new generation
+				if(operation == 2)
+				{
+					List<String> dotBreakdown = new LinkedList<String>(Arrays.asList(fileName.split("\\.")));
+					
+					if(dotBreakdown.size() >= 2)
+					{
+						String fileExtension = dotBreakdown.get(dotBreakdown.size() - 1);
+						dotBreakdown.remove(dotBreakdown.size() - 1);
+						String fileNameNoExt = String.join(".", dotBreakdown);					
+						
+						int generation = 1;
+						while(true)
+						{
+							file = new File(currentDirectory + "/" + fileNameNoExt + "(" + generation + ")." + fileExtension);
+							if(!file.exists())
+							{
+								break;
+							}
+							generation++;
+						}
+						fileName = fileNameNoExt + "(" + generation + ")." + fileExtension;
+					}
+				}
+				
 				
 				//do file operations
 				FileOutputStream dataWriteLocal;
 				try {
-					dataWriteLocal = new FileOutputStream(currentDirectory + "/" + fileName);
+					
+					if(operation == 4) {
+						dataWriteLocal = new FileOutputStream(currentDirectory + "/" + fileName, true);
+					}
+					else {
+						dataWriteLocal = new FileOutputStream(currentDirectory + "/" + fileName);
+
+					}
 					
 					byte[] bytes = new byte[1];
 					int count;
 					int totalCount = 0;
-					
 
 					while((count = dataInFromClient.read(bytes)) > 0)
 					{
@@ -249,10 +285,8 @@ class TCPServer {
 		else
 		{
 			sendMessageToClient("Invalid message received, expected SIZE ####", ResponseCodes.ERROR);
+			System.out.println("messagefromclient: " + clientResponse);
 		}
-
-		
-		
 	}
 
 	private void retrCommand(String clientRequest) {
@@ -299,6 +333,9 @@ class TCPServer {
 	private void sendFile(File file) throws IOException {		
 		if(transmissionType.equals("A"))
 		{	
+			
+			
+			
 			sendMessageToClient("A type not supported, RETR aborted", ResponseCodes.ERROR);
 		}
 		
@@ -319,7 +356,18 @@ class TCPServer {
 		}
 		else
 		{
-			sendMessageToClient("C type not supported, RETR aborted", ResponseCodes.ERROR);
+			byte buffer[] = new byte[1];
+			FileInputStream in = new FileInputStream(file);
+			//BufferedInputStream bufferIn = new BufferedInputStream(in);
+			
+			while((in.read(buffer)) > 0)
+			{
+				dataOutToClient.write(buffer);
+			}
+			
+			System.out.println("SErver sent!");
+			//in.close();
+			dataOutToClient.flush();
 		}
 	}
 
@@ -863,6 +911,8 @@ class TCPServer {
 
 		// split request to check the command
 		String[] requestBreakdown = request.split(" ");
+		
+		System.out.println("comamnd received in validateClientCommand : " + request);
 
 		String command = requestBreakdown[0];
 

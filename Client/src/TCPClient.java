@@ -101,30 +101,34 @@ class TCPClient {
 				}
 			}
 	
-			if(sendMessageToServer(sentence) && storeCommandTriggered == false)
+			if(storeCommandTriggered == false)
 			{
-				reply = readMessageFromServer();
-				
-				//Server responded RETR command with the size of the file to be sent
-				if(checkResponseCode(reply).equals(ResponseCodes.EMPTY))
+				if(sendMessageToServer(sentence))
 				{
-					checkSpaceAndAcknowledge(reply);
+					reply = readMessageFromServer();
+					
+					//Server responded RETR command with the size of the file to be sent
+					if(checkResponseCode(reply).equals(ResponseCodes.EMPTY))
+					{
+						checkSpaceAndAcknowledge(reply);
+					}
+				    
+					//Check for ! to see whether user has been logged in on the server, this will
+					//unlock other commands.
+					if(checkResponseCode(reply).equals(ResponseCodes.LOGGEDIN))
+					{
+						loggedIn = true;
+					}
+					else if(!loggedIn && checkResponseCode(reply).equals(ResponseCodes.SUCCESS))
+					{
+						userOK = true;
+					}
+					
+				    System.out.println("FROM SERVER: " + reply);
 				}
 			    
-				//Check for ! to see whether user has been logged in on the server, this will
-				//unlock other commands.
-				if(checkResponseCode(reply).equals(ResponseCodes.LOGGEDIN))
-				{
-					loggedIn = true;
-				}
-				else if(!loggedIn && checkResponseCode(reply).equals(ResponseCodes.SUCCESS))
-				{
-					userOK = true;
-				}
-				
-			    System.out.println("FROM SERVER: " + reply);
 			}
-		    
+			
 		}
 		
 	   // clientSocket.close(); 
@@ -185,9 +189,8 @@ class TCPClient {
 					System.out.println("Client sent!");
 					dataOutToServer.flush();
 					
-				    System.out.println("FROM SERVER: " + readMessageFromServer());
-
-					
+				    System.out.println("FROM SERVER: " + readMessageFromServer());	
+				    return;
 			}
 			else
 			{
