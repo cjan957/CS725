@@ -251,23 +251,44 @@ class TCPServer {
 					}
 					else {
 						dataWriteLocal = new FileOutputStream(currentDirectory + "/" + fileName);
-
 					}
 					
-					byte[] bytes = new byte[1];
-					int count;
-					int totalCount = 0;
-
-					while((count = dataInFromClient.read(bytes)) > 0)
+					
+					if(transmissionType.equals("A"))
 					{
-						dataWriteLocal.write(bytes, 0, count);
-						totalCount += count;
-						if(totalCount == fileSize) break;
+						Reader r = new InputStreamReader(dataInFromClient, "US-ASCII");
+						//Writer w = new OutputStreamWriter(dataWriteLocal, "US-ASCII");
+						
+						int buffer;
+						int totalCount = 0;
+						
+						while((buffer = r.read()) > 0)
+						{
+							char ch = (char) buffer;
+							dataWriteLocal.write(ch);
+							totalCount += 1;
+							if(totalCount == fileSize) break;
+						}
 					}
 					
-					System.out.println("Total read: " + totalCount);
+					else 
+					{
+						byte[] bytes = new byte[1];
+						int count;
+						int totalCount = 0;
+
+						while((count = dataInFromClient.read(bytes)) > 0)
+						{
+							dataWriteLocal.write(bytes, 0, count);
+							totalCount += count;
+							if(totalCount == fileSize) break;
+						}
+						
+						System.out.println("Total read: " + totalCount);
+						
+						dataWriteLocal.close();
+					}
 					
-					dataWriteLocal.close();
 					
 				} catch (IOException e1) {
 					e1.printStackTrace();
@@ -332,40 +353,33 @@ class TCPServer {
 	}
 	private void sendFile(File file) throws IOException {		
 		if(transmissionType.equals("A"))
-		{	
-			
-			
-			
-			sendMessageToClient("A type not supported, RETR aborted", ResponseCodes.ERROR);
-		}
-		
-		else if(transmissionType.equals("B"))
-		{
-			byte buffer[] = new byte[1];
+		{			
+			int buffer;
 			FileInputStream in = new FileInputStream(file);
-			//BufferedInputStream bufferIn = new BufferedInputStream(in);
+			Writer w = new OutputStreamWriter(dataOutToClient, "US-ASCII");
 			
-			while((in.read(buffer)) > 0)
+			while((buffer = in.read()) > 0)
 			{
-				dataOutToClient.write(buffer);
+				char ch = (char) buffer;
+				w.write(ch);
 			}
-			
-			System.out.println("SErver sent!");
-			//in.close();
-			dataOutToClient.flush();
+			System.out.println("Server sent A!");	
+			//r.close();
+			w.flush();
+			//dataOutToClient.flush();
 		}
+		//B and C modes are the same.
 		else
 		{
 			byte buffer[] = new byte[1];
 			FileInputStream in = new FileInputStream(file);
-			//BufferedInputStream bufferIn = new BufferedInputStream(in);
 			
 			while((in.read(buffer)) > 0)
 			{
 				dataOutToClient.write(buffer);
 			}
 			
-			System.out.println("SErver sent!");
+			System.out.println("Server sent B/C!");
 			//in.close();
 			dataOutToClient.flush();
 		}
