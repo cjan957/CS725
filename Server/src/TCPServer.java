@@ -491,7 +491,7 @@ class TCPServer {
 						ResponseCodes.ERROR);
 			}
 		} else {
-			sendMessageToClient("Not deleted because not a file or a directory", ResponseCodes.ERROR);
+			sendMessageToClient("Not deleted because not a file", ResponseCodes.ERROR);
 		}
 	}
 
@@ -759,9 +759,15 @@ class TCPServer {
 				accountValid = false;
 				// has a password
 				if (!userDetail.hasPassword()) {
+					passwordValid = true;
 					if (!userDetail.hasAccounts()) {
+						accountValid = true;
 						sendMessageToClient(username + " logged in", ResponseCodes.LOGGEDIN);
 						logIn();
+					}
+					else
+					{
+						sendMessageToClient("User-id valid, send account and password", ResponseCodes.SUCCESS);
 					}
 				} else {
 					sendMessageToClient("User-id valid, send account and password", ResponseCodes.SUCCESS);
@@ -788,6 +794,7 @@ class TCPServer {
 				if (userDetail.getPassword().equals(password)) {
 					passwordValid = true;
 					if (!userDetail.hasAccounts() || accountValid) {
+						accountValid = true;
 						sendMessageToClient("Logged in", ResponseCodes.LOGGEDIN);
 						logIn();
 					} else {
